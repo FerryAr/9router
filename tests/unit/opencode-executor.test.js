@@ -32,6 +32,14 @@ describe("OpenCodeExecutor fingerprint (free-tier 429 fix)", () => {
     expect(headers["x-real-ip"]).toBe("198.51.100.9");
   });
 
+  it("omits x-real-ip when client IP is loopback or private", () => {
+    const ex = new OpenCodeExecutor();
+    const h1 = ex.buildHeaders({ rawHeaders: { "x-9r-real-ip": "127.0.0.1" } });
+    expect(h1["x-real-ip"]).toBeUndefined();
+    const h2 = ex.buildHeaders({ rawHeaders: { "x-real-ip": "192.168.1.100" } });
+    expect(h2["x-real-ip"]).toBeUndefined();
+  });
+
   it("omits x-real-ip when no client IP is known", () => {
     const ex = new OpenCodeExecutor();
     const headers = ex.buildHeaders({ rawHeaders: {} });

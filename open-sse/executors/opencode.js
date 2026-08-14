@@ -1,3 +1,13 @@
+function isPublicIp(ip) {
+  if (!ip || typeof ip !== "string") return false;
+  const clean = ip.replace(/^::ffff:/, "").trim();
+  if (clean === "127.0.0.1" || clean === "::1" || clean === "localhost") return false;
+  if (clean.startsWith("10.") || clean.startsWith("192.168.")) return false;
+  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(clean)) return false;
+  if (clean.startsWith("fc00:") || clean.startsWith("fe80:")) return false;
+  return /^[0-9a-fA-F:.]+$/.test(clean);
+}
+
 import crypto from "crypto";
 import { BaseExecutor } from "./base.js";
 import { PROVIDERS } from "../config/providers.js";
@@ -71,7 +81,8 @@ export class OpenCodeExecutor extends BaseExecutor {
     // Forward the sanitized peer IP (x-9r-real-ip is stamped by custom-server.js
     // from the unspoofable TCP socket; fall back to the client-supplied header)
     // so each user IP gets its own daily quota bucket again.
-    const clientIp = lower["x-9r-real-ip"] || lower["x-real-ip"] || "";
+    const rawIp = lower["x-9r-real-ip"] || lower["x-real-ip"] || "";
+    const clientIp = isPublicIp(rawIp) ? rawIp : "";
 
     return {
       "Content-Type": "application/json",
