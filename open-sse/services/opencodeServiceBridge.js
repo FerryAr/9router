@@ -35,7 +35,9 @@ import os from "os";
 import { dbg } from "../utils/debugLog.js";
 import { getWritableDataDir } from "../utils/writableDataDir.js";
 
-const DEFAULT_STATE_PATH = path.join(os.homedir(), ".local", "state", "opencode", "service.json");
+const DEFAULT_STATE_PATH = process.platform === "win32"
+  ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "opencode", "service.json")
+  : path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"), "opencode", "service.json");
 
 // Cache of on-demand daemon processes per proxy URL
 const proxyDaemonPool = new Map();
@@ -1162,10 +1164,12 @@ export async function getDaemonForProxy(proxyUrl = "", { noProxy = "", apiKey } 
     try {
     const env = buildOpenCodeServiceEnv({ proxyUrl, noProxy, apiKey });
 
-      const p = spawn("opencode", ["serve", "--port", "0", "--print-logs"], {
+      const isWin = process.platform === "win32";
+      const p = spawn(isWin ? "opencode.cmd" : "opencode", ["serve", "--port", "0", "--print-logs"], {
         env,
-        cwd: "/tmp",
+        cwd: os.tmpdir(),
         stdio: ["ignore", "pipe", "pipe"],
+        shell: isWin,
       });
 
       let buffer = "";
@@ -1393,6 +1397,12 @@ function resolveDaemonSessionKey(credentials, model) {
   return `${connKey}:${model || "default"}`;
 }
 
+function isLikelyAbsolutePath(val) {
+  if (typeof val !== "string" || !val.trim()) return false;
+  const s = val.trim();
+  return s.startsWith("/") || /^[a-zA-Z]:[\\\/]/.test(s) || s.startsWith("\\\\") || path.isAbsolute(s);
+}
+
 export function resolveClientWorkingDirectory(credentials, body, messages = []) {
   const rawHeaders = credentials?.rawHeaders || credentials?.headers || {};
   const lowerHeaders = {};
@@ -1413,7 +1423,7 @@ export function resolveClientWorkingDirectory(credentials, body, messages = []) 
     lowerHeaders["x-opencode-cwd"],
   ];
   for (const c of headerCandidates) {
-    if (typeof c === "string" && c.trim() && (fs.existsSync(c.trim()) || c.trim().startsWith("/"))) {
+    if (typeof c === "string" && c.trim() && (fs.existsSync(c.trim()) || isLikelyAbsolutePath(c.trim()))) {
       return c.trim();
     }
   }
@@ -1429,7 +1439,7 @@ export function resolveClientWorkingDirectory(credentials, body, messages = []) 
     body?.workspace,
   ];
   for (const c of bodyCandidates) {
-    if (typeof c === "string" && c.trim() && (fs.existsSync(c.trim()) || c.trim().startsWith("/"))) {
+    if (typeof c === "string" && c.trim() && (fs.existsSync(c.trim()) || isLikelyAbsolutePath(c.trim()))) {
       return c.trim();
     }
   }
@@ -1463,7 +1473,7 @@ export function resolveClientWorkingDirectory(credentials, body, messages = []) 
       const match = text.match(regex);
       if (match && match[1]) {
         const candidate = match[1].trim();
-        if (candidate && (fs.existsSync(candidate) || candidate.startsWith("/"))) {
+        if (candidate && (fs.existsSync(candidate) || isLikelyAbsolutePath(candidate))) {
           return candidate;
         }
       }
