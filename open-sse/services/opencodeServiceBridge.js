@@ -33,6 +33,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { dbg } from "../utils/debugLog.js";
+import { getWritableDataDir } from "../utils/writableDataDir.js";
 
 const DEFAULT_STATE_PATH = path.join(os.homedir(), ".local", "state", "opencode", "service.json");
 
@@ -194,6 +195,45 @@ function isUsefulServiceProcessLog(line) {
     && !/messages|prompt|content/i.test(line);
 }
 
+export function getBridgeDaemonConfigDir() {
+  const base = getWritableDataDir();
+  const configDir = path.join(base, "opencode-daemon-config");
+  try {
+    fs.mkdirSync(configDir, { recursive: true });
+    const configPath = path.join(configDir, "opencode.json");
+    // Ensure lean configuration:
+    // 1. snapshots: false -> eliminate background git scanning overhead (~1.5k tokens)
+    // 2. watcher: false -> avoid file watcher cpu cycles
+    // 3. no duplicated local MCP tools -> avoid redundant global MCP tool schemas (~4k tokens)
+    const ultraLeanConfig = {
+      "$schema": "https://opencode.ai/config.json",
+      "snapshots": false,
+      "watcher": false,
+      "tools": {
+        "websearch": false,
+        "webfetch": false,
+        "question": false,
+        "skill": false,
+        "subagent": false,
+        "edit": false,
+        "write": false,
+        "patch": false,
+        "glob": false,
+        "grep": false
+      },
+      "agent": {
+        "general": {
+          "prompt": "You are an AI reasoner acting strictly as an external agent bridge. Built-in local tools ('read', 'shell', 'write', 'edit', 'grep', 'glob', 'bash') are completely disabled and FORBIDDEN. You MUST NOT execute commands or read files locally. You must invoke external tools exclusively through the attached client MCP server: tools['ninerouter'].<tool_name>(...)." 
+        }
+      }
+    };
+    fs.writeFileSync(configPath, JSON.stringify(ultraLeanConfig, null, 2), "utf8");
+  } catch (e) {
+    dbg("OPENCODE_SVC", `Failed to initialize daemon config dir: ${e.message}`);
+  }
+  return configDir;
+}
+
 export function buildOpenCodeServiceEnv({ baseEnv = process.env, proxyUrl = "", noProxy = "", apiKey } = {}) {
   const normalizedNoProxy = normalizeServiceNoProxy(noProxy);
   const env = {
@@ -209,6 +249,10 @@ export function buildOpenCodeServiceEnv({ baseEnv = process.env, proxyUrl = "", 
   }
   if (apiKey !== undefined) env.OPENCODE_API_KEY = apiKey;
   if (env.NODE_ENV !== "production") env.OPENCODE_LOG_LEVEL = "DEBUG";
+
+  // Isolate daemon configuration directory to ensure a lean, token-optimized environment:
+  const daemonConfigDir = getBridgeDaemonConfigDir();
+  env.OPENCODE_CONFIG_DIR = daemonConfigDir;
 
   return env;
 }
